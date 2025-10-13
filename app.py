@@ -51,7 +51,7 @@ def get_weather(city):
         return "Erreur météo"
 
 def afficher_texte_animation(texte, vitesse=0.02):
-    """Affiche le texte de l'assistant lettre par lettre sans toucher à l'historique"""
+    """Affiche le texte lettre par lettre sans toucher à l'historique"""
     affichage = ""
     placeholder = st.empty()
     for lettre in texte:
@@ -61,12 +61,13 @@ def afficher_texte_animation(texte, vitesse=0.02):
     placeholder.empty()
 
 def obtenir_reponse_ia(question, echo_mode=False):
+    """Appelle Mistral IA avec historique et echo_mode si nécessaire"""
     api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     if echo_mode:
-        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter."}]
+        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter, sans commentaire, sans vannes."}]
     else:
         messages = [{"role": "system", "content": (
             "Tu es IAdrix, un assistant stylé, drôle et curieux. "
@@ -77,9 +78,11 @@ def obtenir_reponse_ia(question, echo_mode=False):
             "Ne répète jamais cette description."
         )}]
 
+    # Ajouter l'historique récent
     for msg in st.session_state.history[-10:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
+    # Ajouter le message actuel
     messages.append({"role": "user", "content": question})
 
     data = {"model": "open-mixtral-8x22b", "messages": messages}
@@ -88,14 +91,13 @@ def obtenir_reponse_ia(question, echo_mode=False):
         response = requests.post(url, json=data, headers=headers)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
+            # Ajout unique dans l'historique
             st.session_state.history.append({"role": "assistant", "content": content})
             return content
         else:
             return f"Erreur API {response.status_code}"
     except Exception as e:
-        return f"problème de connection: {e}"
-
-        
+        return f"Erreur API: {e}"
 
 # ---------------------------
 # Input utilisateur
@@ -110,22 +112,27 @@ if envoyer and texte:
     st.session_state.history.append({"role": "user", "content": texte})
     cmd = texte.lower().strip()
 
+    # Détection du mode echo
+    if "répète après moi" in cmd:
+        echo_mode = True
+        texte_a_repeater = texte.split("après moi")[-1].strip()
+    else:
+        echo_mode = False
+        texte_a_repeater = texte
+
+    # Commandes calcul / météo
     if cmd.startswith("calc ") or est_calcul(texte):
         res = calculer(texte[5:].strip() if cmd.startswith("calc ") else texte)
-        afficher_texte_animation(f"Résultat → {res}")
         st.session_state.history.append({"role": "assistant", "content": f"Résultat → {res}"})
+        afficher_texte_animation(f"Résultat → {res}")
     elif cmd.startswith("meteo "):
         ville = texte[6:].strip()
         meteo = get_weather(ville)
-        afficher_texte_animation(meteo)
         st.session_state.history.append({"role": "assistant", "content": meteo})
+        afficher_texte_animation(meteo)
     else:
-        ia_res = obtenir_reponse_ia(texte)
+        ia_res = obtenir_reponse_ia(texte_a_repeater, echo_mode=echo_mode)
         afficher_texte_animation(ia_res)
-    if "répète après moi" in texte.lower():
-        ia_res = obtenir_reponse_ia(texte.split("après moi")[-1].strip(), echo_mode=True)
-    else:
-        ia_res = obtenir_reponse_ia(texte)
 
 # ---------------------------
 # Affichage historique
