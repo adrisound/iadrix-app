@@ -2,6 +2,19 @@ import streamlit as st
 import requests
 from sympy import sympify
 import time
+# --- MÉMOIRE DE IADRIX ---
+if "memoire" not in st.session_state:
+    st.session_state.memoire = {}
+
+def memoriser(clef, valeur):
+    st.session_state.memoire[clef] = valeur
+
+def rappeler(clef):
+    return st.session_state.memoire.get(clef, None)
+
+
+
+
 
 # ---------------------------
 # Config Streamlit
@@ -123,3 +136,4 @@ for msg in st.session_state.history:
 
 # Scroll auto
 st.markdown("<script>window.scrollTo(0, document.body.scrollHeight);</script>", unsafe_allow_html=True)
+
