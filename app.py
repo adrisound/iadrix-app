@@ -2,19 +2,6 @@ import streamlit as st
 import requests
 from sympy import sympify
 import time
-# --- MÉMOIRE DE IADRIX ---
-if "memoire" not in st.session_state:
-    st.session_state.memoire = {}
-
-def memoriser(clef, valeur):
-    st.session_state.memoire[clef] = valeur
-
-def rappeler(clef):
-    return st.session_state.memoire.get(clef, None)
-
-
-
-
 
 # ---------------------------
 # Config Streamlit
@@ -28,7 +15,7 @@ body {background-color: white; color: #00AA00; font-family: monospace;}
 div.stScrollView > div {scroll-behavior: smooth;}
 </style>
 """, unsafe_allow_html=True)
-st.title("IAdrix 💻 - Chatbot Multifonction (Mémoire intégrée améliorée)")
+st.title("IAdrix 💻")
 
 # ---------------------------
 # Session state
@@ -64,6 +51,7 @@ def get_weather(city):
         return "Erreur météo"
 
 def afficher_texte_animation(texte, vitesse=0.02):
+    """Affiche le texte de l'assistant lettre par lettre sans toucher à l'historique"""
     affichage = ""
     placeholder = st.empty()
     for lettre in texte:
@@ -71,14 +59,14 @@ def afficher_texte_animation(texte, vitesse=0.02):
         placeholder.text(f"IAdrix : {affichage}")
         time.sleep(vitesse)
     placeholder.empty()
-    st.session_state.history.append({"role": "assistant", "content": texte})
 
 def obtenir_reponse_ia(question):
+    """Appelle l'IA Mistral avec historique complet et renvoie la réponse"""
     api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Construction du message avec mémoire
+    # Messages formatés pour Mistral
     messages = [{"role": "system", "content": (
         "Tu es IAdrix, un assistant drôle, curieux et enthousiaste. "
         "Tu parles comme un pote, naturel, et dis « Wesh ça va toi, tu vis hein ??? » quand quelque chose t’étonne. "
@@ -86,8 +74,9 @@ def obtenir_reponse_ia(question):
         "Ne répète jamais tes qualités, sois fluide et cohérent."
     )}]
 
-    # Historique limité pour éviter surcharge
-    messages.extend(st.session_state.history[-10:])
+    # Ajout de l'historique récent
+    for msg in st.session_state.history[-10:]:
+        messages.append({"role": msg["role"], "content": msg["content"]})
 
     # Ajout du message actuel
     messages.append({"role": "user", "content": question})
@@ -97,11 +86,14 @@ def obtenir_reponse_ia(question):
     try:
         response = requests.post(url, json=data, headers=headers)
         if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
+            content = response.json()['choices'][0]['message']['content']
+            # Ajout dans l'historique
+            st.session_state.history.append({"role": "assistant", "content": content})
+            return content
         else:
             return f"Erreur API {response.status_code}"
-    except:
-        return "Erreur API"
+    except Exception as e:
+        return f"Erreur API: {e}"
 
 # ---------------------------
 # Input utilisateur
@@ -119,10 +111,12 @@ if envoyer and texte:
     if cmd.startswith("calc ") or est_calcul(texte):
         res = calculer(texte[5:].strip() if cmd.startswith("calc ") else texte)
         afficher_texte_animation(f"Résultat → {res}")
+        st.session_state.history.append({"role": "assistant", "content": f"Résultat → {res}"})
     elif cmd.startswith("meteo "):
         ville = texte[6:].strip()
         meteo = get_weather(ville)
         afficher_texte_animation(meteo)
+        st.session_state.history.append({"role": "assistant", "content": meteo})
     else:
         ia_res = obtenir_reponse_ia(texte)
         afficher_texte_animation(ia_res)
@@ -136,4 +130,3 @@ for msg in st.session_state.history:
 
 # Scroll auto
 st.markdown("<script>window.scrollTo(0, document.body.scrollHeight);</script>", unsafe_allow_html=True)
-
