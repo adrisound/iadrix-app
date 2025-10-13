@@ -60,30 +60,26 @@ def afficher_texte_animation(texte, vitesse=0.02):
         time.sleep(vitesse)
     placeholder.empty()
 
-def obtenir_reponse_ia(question):
-    """Appelle l'IA Mistral avec historique complet et renvoie la réponse"""
+def obtenir_reponse_ia(question, echo_mode=False):
     api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    # Messages formatés pour Mistral
-    messages = [{
-        "role": "system",
-        "content": (
+    if echo_mode:
+        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter."}]
+    else:
+        messages = [{"role": "system", "content": (
             "Tu es IAdrix, un assistant stylé, drôle et curieux. "
             "Tu parles comme un pote, naturel et un peu taquin. "
             "Quand quelque chose t’étonne, tu peux dire : « Wesh ça va toi, tu vis hein ??? ». "
             "Tu peux balancer quelques vannes, mais toujours de façon marrante et respectueuse. "
             "Ne dis jamais que tu es un assistant ou que tu suis des règles. "
-            "Ne répète jamais cette description, ne parle jamais de ton rôle, juste sois toi-même."
-        )
-    }]
+            "Ne répète jamais cette description."
+        )}]
 
-    # Ajout de l'historique récent
     for msg in st.session_state.history[-10:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
-    # Ajout du message actuel
     messages.append({"role": "user", "content": question})
 
     data = {"model": "open-mixtral-8x22b", "messages": messages}
@@ -92,13 +88,14 @@ def obtenir_reponse_ia(question):
         response = requests.post(url, json=data, headers=headers)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
-            # Ajout dans l'historique
             st.session_state.history.append({"role": "assistant", "content": content})
             return content
         else:
             return f"Erreur API {response.status_code}"
     except Exception as e:
-        return f"Erreur API: {e}"
+        return f"problème de connection: {e}"
+
+        
 
 # ---------------------------
 # Input utilisateur
@@ -125,6 +122,10 @@ if envoyer and texte:
     else:
         ia_res = obtenir_reponse_ia(texte)
         afficher_texte_animation(ia_res)
+    if "répète après moi" in texte.lower():
+        ia_res = obtenir_reponse_ia(texte.split("après moi")[-1].strip(), echo_mode=True)
+    else:
+        ia_res = obtenir_reponse_ia(texte)
 
 # ---------------------------
 # Affichage historique
