@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import wikipedia
 import re
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 
 # ---------------------------
 # Config Streamlit
@@ -10,31 +9,20 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 st.set_page_config(page_title="IAdrix 💻", layout="wide")
 st.markdown("""
 <style>
-body {background-color: white; color: #00AA00; font-family: monospace;}
-.stTextInput>div>div>input {background-color: white; color: #00AA00; font-family: monospace;}
-.stButton>button {background-color: #111; color: #00AA00; font-family: monospace;}
+body {background-color: #1E1E1E; color: #00FF00; font-family: monospace;}
+.stTextInput>div>div>input {background-color: #000000; color: #00FF00; font-family: monospace;}
+.stButton>button {background-color: #111111; color: #00FF00; font-family: monospace;}
 div.stScrollView > div {scroll-behavior: smooth;}
+.stMarkdown p {color:#00FF00;}
 </style>
 """, unsafe_allow_html=True)
 st.title("IAdrix 💻")
 
 # ---------------------------
-# Session state
+# Mémoire chat
 # ---------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
-
-if "webrtc" not in st.session_state:
-    st.session_state.webrtc = webrtc_streamer(
-        key="microphone",
-        mode=WebRtcMode.SENDONLY,
-        client_settings=ClientSettings(
-            rtc_configuration={"iceServers":[{"urls":["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"audio": True, "video": False}
-        ),
-        audio_receiver_size=256,
-        async_processing=True
-    )
 
 # ---------------------------
 # Fonctions utilitaires
@@ -42,7 +30,7 @@ if "webrtc" not in st.session_state:
 def get_weather(city):
     try:
         geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1").json()
-        if "results" not in geo or len(geo["results"])==0:
+        if "results" not in geo or len(geo["results"]) == 0:
             return "Ville introuvable."
         lat, lon = geo["results"][0]["latitude"], geo["results"][0]["longitude"]
         city_name = geo["results"][0].get("name", city)
@@ -64,15 +52,12 @@ def recherche_wiki(query):
             return f"Wikipedia — {title} :\n\n{summary}"
         except wikipedia.DisambiguationError as e:
             options = e.options[:5]
-            return "Résultat ambigu Wikipédia, précise ta recherche :\n" + "\n".join(f"- {opt}" for opt in options)
+            return "Résultat ambigu, précise ta recherche :\n" + "\n".join(f"- {opt}" for opt in options)
         except:
             return "Problème avec Wikipédia pour ce sujet."
     except:
         return "Erreur recherche Wikipédia."
 
-# ---------------------------
-# IA Mistral
-# ---------------------------
 def obtenir_reponse_ia(question):
     api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
     url = "https://api.mistral.ai/v1/chat/completions"
@@ -93,7 +78,7 @@ def obtenir_reponse_ia(question):
         response = requests.post(url, json=data, headers=headers, timeout=20)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content'].strip()
-            st.session_state.history.append({"role":"assistant", "content": content})
+            st.session_state.history.append({"role":"assistant","content":content})
             return content
         else:
             return f"Erreur API {response.status_code}"
@@ -101,10 +86,11 @@ def obtenir_reponse_ia(question):
         return f"Erreur API: {e}"
 
 # ---------------------------
-# Input texte
+# Input utilisateur (Entrée ou bouton)
 # ---------------------------
-texte = st.text_input("Vous :", key="input_text")
-envoyer = st.button("Envoyer")
+with st.form("chat_form", clear_on_submit=True):
+    texte = st.text_input("Vous :", key="input_text")
+    envoyer = st.form_submit_button("Envoyer")
 
 if envoyer and texte:
     st.session_state.history.append({"role":"user","content":texte})
@@ -121,10 +107,13 @@ if envoyer and texte:
     st.session_state.history.append({"role":"assistant","content":res})
 
 # ---------------------------
-# Affichage historique
+# Affichage historique stylé
 # ---------------------------
 for msg in st.session_state.history:
-    prefix = "Vous : " if msg["role"]=="user" else "IAdrix : "
-    st.text(prefix + msg["content"])
+    if msg["role"]=="user":
+        st.markdown(f"**Vous :** {msg['content']}")
+    else:
+        st.markdown(f"**IAdrix :** {msg['content']}")
 
+# Scroll auto
 st.markdown("<script>window.scrollTo(0, document.body.scrollHeight);</script>", unsafe_allow_html=True)
