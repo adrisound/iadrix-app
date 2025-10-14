@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 from sympy import sympify
 import time
+import wikipedia
+import re
 
 # ---------------------------
 # Config Streamlit
@@ -21,19 +23,19 @@ st.title("IAdrix 💻")
 # Session state
 # ---------------------------
 if "history" not in st.session_state:
-    st.session_state.history = []  # format : [{"role": "user"/"assistant", "content": "..."}]
+    st.session_state.history = []  # [{"role":"user"/"assistant", "content":"..."}]
 
 # ---------------------------
-# Fonctions utilitaires
+# Utilitaires
 # ---------------------------
 def calculer(expr):
     try:
         return str(sympify(expr).evalf())
-    except:
+    except Exception:
         return "Erreur dans le calcul"
 
 def est_calcul(expr):
-    return all(c in "0123456789+-*/(). " for c in expr)
+    return all(c in "0123456789+-*/(). " for c in expr.strip())
 
 def get_weather(city):
     try:
@@ -47,11 +49,35 @@ def get_weather(city):
         if not cw:
             return "Pas de données météo."
         return f"{city_name} — {cw['temperature']}°C, vent {cw['windspeed']} km/h"
-    except:
+    except Exception:
         return "Erreur météo"
 
+# Recherche Wikipédia améliorée (gestion désambiguïsation)
+def recherche_wiki(query):
+    try:
+        wikipedia.set_lang("fr")
+        # première recherche pour obtenir la page la plus pertinente
+        search_hits = wikipedia.search(query, results=5)
+        if not search_hits:
+            return "Aucun résultat Wikipédia trouvé."
+        # si premier résultat correspond bien, on prend son résumé
+        try:
+            # tente d'obtenir un résumé du premier résultat
+            title = search_hits[0]
+            summary = wikipedia.summary(title, sentences=3)
+            return f"Wikipedia — {title} :\n\n{summary}"
+        except wikipedia.DisambiguationError as e:
+            # si ambiguïté, renvoyer un message clair avec options
+            options = e.options[:5]
+            return ("Résultat ambigu sur Wikipédia. Choisis une option ou précise ta recherche :\n" +
+                    "\n".join(f"- {opt}" for opt in options))
+        except Exception:
+            return "Problème avec Wikipédia pour ce sujet."
+    except Exception:
+        return "Erreur recherche Wikipédia."
+
 def afficher_texte_animation(texte, vitesse=0.02):
-    """Affiche le texte lettre par lettre sans toucher à l'historique"""
+    """Animation lettre par lettre sans toucher à l'historique"""
     affichage = ""
     placeholder = st.empty()
     for lettre in texte:
@@ -60,38 +86,70 @@ def afficher_texte_animation(texte, vitesse=0.02):
         time.sleep(vitesse)
     placeholder.empty()
 
+def nettoie_reponse_du_role(text):
+    """
+    Si le modèle a récité une description du bot (cas fréquent),
+    on enlève les phrases qui ressemblent à "Je suis IAdrix..." ou "Tu es IAdrix...".
+    -> évite que l'IA nous ressorte sa fiche de poste.
+    """
+    # supprimer phrases contenant "Je suis IAdrix" ou "Tu es IAdrix" ou "assistant" descriptif
+    patterns = [
+        r"Je suis IAdrix[^\.\n]*[\.!\?]?", 
+        r"Tu es IAdrix[^\.\n]*[\.!\?]?",
+        r"Je suis un assistant[^\.\n]*[\.!\?]?",
+        r"Je peux être sérieux[^\.\n]*[\.!\?]?"
+    ]
+    cleaned = text
+    for p in patterns:
+        cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE)
+    # si après nettoyage il reste beaucoup de vide, retourne version originale courte
+    if len(cleaned.strip()) < 10:
+        return text.strip()
+    # sinon retourne nettoyé et propre
+    # retire espaces en double et début/fin blancs
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    return cleaned
+
+# ---------------------------
+# Fonction IA (Mistral)
+# ---------------------------
 def obtenir_reponse_ia(question, echo_mode=False):
-    """Appelle Mistral IA avec historique et echo_mode si nécessaire"""
-    api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
+    """
+    - echo_mode True : on demande AU MODELE de répéter exactement (prompt minimal)
+    - echo_mode False: prompt système optimisé (sans la phrase demandée)
+    """
+    api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"  # remplace si besoin
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     if echo_mode:
-        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter, sans commentaire, sans vannes."}]
+        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter, sans commentaire."}]
     else:
+        # PROMPT SYSTÈME AMÉLIORÉ — plus direct, pas de phrase "Wesh..." et directive pour être concis
         messages = [{"role": "system", "content": (
-            "Tu es IAdrix, un assistant stylé, drôle et curieux. "
-            "Tu parles comme un pote, naturel et un peu taquin. "
-            "Quand quelque chose t’étonne, tu peux dire : « Wesh ça va toi, tu vis hein ??? ». "
-            "Tu peux balancer quelques vannes, mais toujours de façon marrante et respectueuse. "
-            "Ne dis jamais que tu es un assistant ou que tu suis des règles. "
-            "Ne répète jamais cette description."
+            "Tu joues le rôle d'IAdrix, un pote drôle et direct. "
+            "Réponds de façon naturelle, concise et utile. "
+            "Si l'utilisateur demande une répétition exacte, obéis (mode echo). "
+            "Ne dis jamais que tu es un assistant, et ne répète pas ce texte système. "
+            "Si tu ne sais pas, dis simplement 'Je ne sais pas' et propose d'effectuer une recherche avec la commande 'cherche <sujet>'."
         )}]
 
-    # Ajouter l'historique récent
+    # Ajouter les 10 derniers messages du chat (user/assistant)
     for msg in st.session_state.history[-10:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
-    # Ajouter le message actuel
+    # Ajouter le message courant
     messages.append({"role": "user", "content": question})
 
     data = {"model": "open-mixtral-8x22b", "messages": messages}
 
     try:
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(url, json=data, headers=headers, timeout=20)
         if response.status_code == 200:
-            content = response.json()['choices'][0]['message']['content']
-            # Ajout unique dans l'historique
+            content = response.json()['choices'][0]['message']['content'].strip()
+            # Nettoyage anti-répétition du rôle
+            content = nettoie_reponse_du_role(content)
+            # Ajout unique à l'historique
             st.session_state.history.append({"role": "assistant", "content": content})
             return content
         else:
@@ -109,28 +167,43 @@ envoyer = st.button("Envoyer")
 # Logique principale
 # ---------------------------
 if envoyer and texte:
+    # Ajout du message utilisateur dans l'historique (unique)
     st.session_state.history.append({"role": "user", "content": texte})
     cmd = texte.lower().strip()
 
-    # Détection du mode echo
-    if "répète après moi" in cmd:
+    # Mode echo (détecte "répète après moi" ou "repete apres moi")
+    if "répète après moi" in cmd or "repete apres moi" in cmd:
         echo_mode = True
-        texte_a_repeater = texte.split("après moi")[-1].strip()
+        # on récupère la partie à répéter : tout après "après moi"
+        # si l'utilisateur n'a rien après, on garde le texte entier
+        parts = re.split(r"après moi|apres moi", texte, flags=re.IGNORECASE)
+        texte_a_repeater = parts[-1].strip() if len(parts) > 1 and parts[-1].strip() else texte
     else:
         echo_mode = False
         texte_a_repeater = texte
 
-    # Commandes calcul / météo
+    # Commandes directes : calc / meteo / cherche
     if cmd.startswith("calc ") or est_calcul(texte):
         res = calculer(texte[5:].strip() if cmd.startswith("calc ") else texte)
-        st.session_state.history.append({"role": "assistant", "content": f"Résultat → {res}"})
-        afficher_texte_animation(f"Résultat → {res}")
+        assistant_text = f"Résultat → {res}"
+        st.session_state.history.append({"role": "assistant", "content": assistant_text})
+        afficher_texte_animation(assistant_text)
+
     elif cmd.startswith("meteo "):
         ville = texte[6:].strip()
         meteo = get_weather(ville)
         st.session_state.history.append({"role": "assistant", "content": meteo})
         afficher_texte_animation(meteo)
+
+    elif cmd.startswith("cherche ") or cmd.startswith("qui est "):
+        # On essaie Wikipédia d'abord
+        query = re.sub(r'^(cherche|qui est)\s+', '', texte, flags=re.IGNORECASE).strip()
+        res = recherche_wiki(query)
+        st.session_state.history.append({"role": "assistant", "content": res})
+        afficher_texte_animation(res)
+
     else:
+        # Appel normal à l'IA (echo_mode géré)
         ia_res = obtenir_reponse_ia(texte_a_repeater, echo_mode=echo_mode)
         afficher_texte_animation(ia_res)
 
