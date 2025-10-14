@@ -1,4 +1,8 @@
 streamlit
 requests
-sympy
 wikipedia
+pyttsx3
+SpeechRecognition
+pyaudio
+sympy
+
