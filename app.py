@@ -109,6 +109,7 @@ def obtenir_reponse_ia(question, echo_mode=False):
             "Tu réponds simplement, sans phrases de présentation inutiles. "
             "Sois amical, un peu taquin, mais clair. "
             "Si tu ne sais pas quelque chose, dis-le honnêtement et propose d'utiliser la commande 'cherche <sujet>'."
+            "adapte toi au language de l'utilisateur"
         )}]
 
     # Ajoute les 20 derniers messages pour garder le contexte
@@ -183,4 +184,5 @@ for msg in st.session_state.history:
     st.text(prefix + msg["content"])
 
 st.markdown("<script>window.scrollTo(0, document.body.scrollHeight);</script>", unsafe_allow_html=True)
+
 
