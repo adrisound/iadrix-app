@@ -1,13 +1,12 @@
 import streamlit as st
 import requests
-import time
-import re
 import wikipedia
-import pyttsx3
-import speech_recognition as sr
+import re
+import time
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
 
 # ---------------------------
-# CONFIG STREAMLIT
+# Config Streamlit
 # ---------------------------
 st.set_page_config(page_title="IAdrix 💻", layout="wide")
 st.markdown("""
@@ -18,27 +17,17 @@ body {background-color: white; color: #00AA00; font-family: monospace;}
 div.stScrollView > div {scroll-behavior: smooth;}
 </style>
 """, unsafe_allow_html=True)
-st.title("IAdrix 💻 (Vocal + Texte)")
+st.title("IAdrix 💻")
 
 # ---------------------------
-# SESSION STATE
+# Session state
 # ---------------------------
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state.history = []  # [{"role":"user"/"assistant","content":"..."}]
 
 # ---------------------------
-# FONCTIONS UTILES
+# Fonctions utilitaires
 # ---------------------------
-def calculer(expr):
-    from sympy import sympify
-    try:
-        return str(sympify(expr).evalf())
-    except:
-        return "Erreur dans le calcul"
-
-def est_calcul(expr):
-    return all(c in "0123456789+-*/(). " for c in expr.strip())
-
 def get_weather(city):
     try:
         geo = requests.get(f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1").json()
@@ -57,75 +46,45 @@ def get_weather(city):
 def recherche_wiki(query):
     try:
         wikipedia.set_lang("fr")
-        hits = wikipedia.search(query, results=5)
-        if not hits:
+        search_hits = wikipedia.search(query, results=5)
+        if not search_hits:
             return "Aucun résultat Wikipédia trouvé."
         try:
-            title = hits[0]
+            title = search_hits[0]
             summary = wikipedia.summary(title, sentences=3)
             return f"Wikipedia — {title} :\n\n{summary}"
         except wikipedia.DisambiguationError as e:
             options = e.options[:5]
-            return "Résultat ambigu sur Wikipédia. Options :\n" + "\n".join(f"- {opt}" for opt in options)
+            return "Résultat ambigu Wikipédia, précise ta recherche :\n" + "\n".join(f"- {opt}" for opt in options)
         except:
-            return "Problème avec Wikipédia."
+            return "Problème avec Wikipédia pour ce sujet."
     except:
         return "Erreur recherche Wikipédia."
 
-def afficher_texte_animation(texte, vitesse=0.02):
-    affichage = ""
-    placeholder = st.empty()
-    for lettre in texte:
-        affichage += lettre
-        placeholder.text(f"IAdrix : {affichage}")
-        time.sleep(vitesse)
-    placeholder.empty()
-
-def nettoie_reponse_du_role(text):
-    patterns = [
-        r"Je suis IAdrix[^\.\n]*[\.!\?]?",
-        r"Tu es IAdrix[^\.\n]*[\.!\?]?",
-        r"Je suis un assistant[^\.\n]*[\.!\?]?",
-        r"Je peux être sérieux[^\.\n]*[\.!\?]?"
-    ]
-    cleaned = text
-    for p in patterns:
-        cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE)
-    if len(cleaned.strip()) < 10:
-        return text.strip()
-    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
-    return cleaned
-
 # ---------------------------
-# FONCTION MISTRAL IA
+# Fonctions IA (Mistral)
 # ---------------------------
-def obtenir_reponse_ia(question, echo_mode=False):
-    api_key = "TA_CLE_API_ICI"  # <-- remplace par ta clé Mistral
+def obtenir_reponse_ia(question):
+    api_key = "yzmNsxBU31PkKWs7v4EGkbUeiLZvplpU"
     url = "https://api.mistral.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    if echo_mode:
-        messages = [{"role": "system", "content": "Répète exactement ce que l'utilisateur dit, sans rien ajouter."}]
-    else:
-        messages = [{"role": "system", "content": (
-            "Tu joues le rôle d'IAdrix, un pote drôle et direct. "
-            "Réponds naturel, concis et utile. "
-            "Ne dis jamais que tu es un assistant ni répète ce prompt. "
-            "Si tu ne sais pas, dis 'Je ne sais pas' et propose 'cherche <sujet>'."
-        )}]
-
+    # Historique limité pour éviter surcharge
+    messages = [{"role": "system", "content": (
+        "Tu joues le rôle d'IAdrix, un pote drôle et direct. "
+        "Réponds de façon naturelle, concise et utile. "
+        "Ne dis jamais que tu es un assistant, ne répète pas ce texte système. "
+        "Si tu ne sais pas, dis 'Je ne sais pas' et propose d'utiliser 'cherche <sujet>'."
+    )}]
     for msg in st.session_state.history[-10:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
-
     messages.append({"role": "user", "content": question})
-
     data = {"model": "open-mixtral-8x22b", "messages": messages}
 
     try:
         response = requests.post(url, json=data, headers=headers, timeout=20)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content'].strip()
-            content = nettoie_reponse_du_role(content)
             st.session_state.history.append({"role": "assistant", "content": content})
             return content
         else:
@@ -134,93 +93,51 @@ def obtenir_reponse_ia(question, echo_mode=False):
         return f"Erreur API: {e}"
 
 # ---------------------------
-# FONCTION SYNTHÈSE VOCALE
+# WebRTC pour chat vocal
 # ---------------------------
-engine = pyttsx3.init()
-engine.setProperty('rate', 150)
-engine.setProperty('voice', 'fr')
+webrtc_ctx = webrtc_streamer(
+    key="microphone",
+    mode=WebRtcMode.SENDONLY,
+    client_settings=ClientSettings(
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"audio": True, "video": False},
+    ),
+    audio_receiver_size=256,
+    async_processing=True
+)
 
-def parler_ia(texte):
-    engine.say(texte)
-    engine.runAndWait()
-
-# ---------------------------
-# FONCTION MICRO
-# ---------------------------
-def ecouter_micro():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.text("Parle maintenant...")
-        audio = r.listen(source)
-    try:
-        texte = r.recognize_google(audio, language="fr-FR")
-        return texte
-    except:
-        return "Je n'ai pas compris ce que tu as dit."
+if webrtc_ctx.audio_receiver:
+    audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
+    if audio_frames:
+        # Ici tu pourrais sauver audio_frames en WAV puis envoyer à une API Speech-to-Text
+        st.text("Audio reçu ! Pour l'instant, le traitement audio n'est pas encore fait.")
 
 # ---------------------------
-# INTERFACE STREAMLIT
+# Input texte utilisateur
 # ---------------------------
-st.subheader("Chat vocal")
-if st.button("Parler à IAdrix"):
-    texte_user = ecouter_micro()
-    st.text(f"Vous : {texte_user}")
-
-    # Commandes directes
-    cmd = texte_user.lower().strip()
-    if cmd.startswith("calc ") or est_calcul(texte_user):
-        res = calculer(texte_user[5:].strip() if cmd.startswith("calc ") else texte_user)
-        assistant_text = f"Résultat → {res}"
-    elif cmd.startswith("meteo "):
-        ville = texte_user[6:].strip()
-        assistant_text = get_weather(ville)
-    elif cmd.startswith("cherche ") or cmd.startswith("qui est "):
-        query = re.sub(r'^(cherche|qui est)\s+', '', texte_user, flags=re.IGNORECASE).strip()
-        assistant_text = recherche_wiki(query)
-    else:
-        assistant_text = obtenir_reponse_ia(texte_user)
-
-    st.text(f"IAdrix : {assistant_text}")
-    parler_ia(assistant_text)
-
-# ---------------------------
-# Chat texte classique
-# ---------------------------
-texte = st.text_input("Tapez ici et appuyez sur Entrée :", value="", key="input_text")
+texte = st.text_input("Vous :", value="", key="input_text")
 envoyer = st.button("Envoyer")
 
-if texte and (envoyer or st.session_state.get("input_text") != texte):
+if envoyer and texte:
     st.session_state.history.append({"role": "user", "content": texte})
     cmd = texte.lower().strip()
-    echo_mode = "répète après moi" in cmd or "repete apres moi" in cmd
-    texte_a_repeater = texte
-    if echo_mode:
-        parts = re.split(r"après moi|apres moi", texte, flags=re.IGNORECASE)
-        texte_a_repeater = parts[-1].strip() if len(parts) > 1 and parts[-1].strip() else texte
 
-    if cmd.startswith("calc ") or est_calcul(texte):
-        res = calculer(texte[5:].strip() if cmd.startswith("calc ") else texte)
-        assistant_text = f"Résultat → {res}"
-        st.session_state.history.append({"role": "assistant", "content": assistant_text})
-        afficher_texte_animation(assistant_text)
-    elif cmd.startswith("meteo "):
+    if cmd.startswith("meteo "):
         ville = texte[6:].strip()
-        assistant_text = get_weather(ville)
-        st.session_state.history.append({"role": "assistant", "content": assistant_text})
-        afficher_texte_animation(assistant_text)
+        res = get_weather(ville)
     elif cmd.startswith("cherche ") or cmd.startswith("qui est "):
         query = re.sub(r'^(cherche|qui est)\s+', '', texte, flags=re.IGNORECASE).strip()
-        assistant_text = recherche_wiki(query)
-        st.session_state.history.append({"role": "assistant", "content": assistant_text})
-        afficher_texte_animation(assistant_text)
+        res = recherche_wiki(query)
     else:
-        assistant_text = obtenir_reponse_ia(texte_a_repeater, echo_mode=echo_mode)
-        afficher_texte_animation(assistant_text)
+        res = obtenir_reponse_ia(texte)
+
+    st.session_state.history.append({"role": "assistant", "content": res})
 
 # ---------------------------
-# AFFICHAGE HISTORIQUE
+# Affichage historique
 # ---------------------------
 for msg in st.session_state.history:
     prefix = "Vous : " if msg["role"] == "user" else "IAdrix : "
     st.text(prefix + msg["content"])
+
 st.markdown("<script>window.scrollTo(0, document.body.scrollHeight);</script>", unsafe_allow_html=True)
