@@ -1,8 +1,6 @@
 streamlit
 requests
 wikipedia
-sympy
-time
-re
+
 
 
